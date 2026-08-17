@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mein Fahrtenbuch</title>
+    <style>
+        :root {
+            --bg-color: #f4f4f9;
+            --card-bg: #ffffff;
+            --text-color: #333333;
+            --primary: #007bff;
+            --success: #28a745;
+            --danger: #dc3545;
+            --disabled: #c6c6cc;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 500px;
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 16px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        }
+
+        h1, h2 {
+            text-align: center;
+            margin-top: 0;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            flex: 1;
+            padding: 16px;
+            font-size: 18px;
+            font-weight: bold;
+            border: none;
+            border-radius: 12px;
+            color: white;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+
+        button:active:not(:disabled) {
+            transform: scale(0.97);
+        }
+
+        #startBtn { background-color: var(--success); }
+        #startBtn:disabled { background-color: var(--disabled); cursor: not-allowed; }
+        
+        #stopBtn { background-color: var(--danger); }
+        #stopBtn:disabled { background-color: var(--disabled); cursor: not-allowed; }
+
+        #status {
+            text-align: center;
+            padding: 10px;
+            margin-bottom: 20px;
+            font-weight: 500;
+            background: #e9ecef;
+            border-radius: 8px;
+        }
+
+        .history {
+            margin-top: 30px;
+        }
+
+        ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        li {
+            background: var(--bg-color);
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 12px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .dist {
+            font-size: 18px;
+            font-weight: bold;
+            color: var(--primary);
+            margin-top: 8px;
+            display: block;
+        }
+
+        .clear-btn {
+            background-color: transparent;
+            color: var(--danger);
+            border: 1px solid var(--danger);
+            padding: 8px;
+            font-size: 14px;
+            margin-top: 20px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Fahrtenbuch</h1>
+        
+        <div class="controls">
+            <button id="startBtn">Start</button>
+            <button id="stopBtn" disabled>Stop</button>
+        </div>
+        
+        <div id="status">Bereit für die nächste Fahrt.</div>
+        
+        <div class="history">
+            <h2>Letzte Fahrten</h2>
+            <ul id="logList"></ul>
+            <button id="clearBtn" class="clear-btn">Gesamten Verlauf löschen</button>
+        </div>
+    </div>
+
+    <script>
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusDiv = document.getElementById('status');
+        const logList = document.getElementById('logList');
+        const clearBtn = document.getElementById('clearBtn');
+
+        // Lade gespeicherte Daten (falls vorhanden)
+        let currentTrip = JSON.parse(localStorage.getItem('currentTrip'));
+        let logs = JSON.parse(localStorage.getItem('fahrtenLogs')) || [];
+
+        // Berechnet die Distanz zwischen zwei Koordinaten in Kilometern (Haversine-Formel)
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Erdradius in km
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+
+        // Benutzeroberfläche aktualisieren
+        function updateUI() {
+            logList.innerHTML = '';
+            logs.forEach(log => {
+                const li = document.createElement('li');
+                li.innerHTML = `
+                    <strong>Start:</strong> ${log.startTime} <br>
+                    <strong>Stop:</strong> ${log.stopTime} <br>
+                    <span class="dist">+ ${log.distance} km</span>
+                `;
+                logList.appendChild(li);
+            });
+
+            if (currentTrip) {
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                statusDiv.innerText = "📍 Fahrt läuft seit " + currentTrip.startTime.split(',')[1];
+            } else {
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                statusDiv.innerText = "Bereit für die nächste Fahrt.";
+            }
+        }
+
+        // GPS Optionen für genauere Ortung
+        const gpsOptions = {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0
+        };
+
+        // START
+        startBtn.addEventListener('click', () => {
+            if (!("geolocation" in navigator)) {
+                alert("Dein Browser unterstützt kein GPS.");
+                return;
+            }
+
+            statusDiv.innerText = "Suche GPS Signal...";
+            startBtn.disabled = true;
+
+            navigator.geolocation.getCurrentPosition(position => {
+                const now = new Date();
+                currentTrip = {
+                    startLat: position.coords.latitude,
+                    startLon: position.coords.longitude,
+                    startTime: now.toLocaleString('de-DE')
+                };
+                
+                localStorage.setItem('currentTrip', JSON.stringify(currentTrip));
+                updateUI();
+            }, error => {
+                alert("Fehler beim Abrufen des Standorts. Bitte GPS aktivieren und Berechtigung erteilen.");
+                startBtn.disabled = false;
+                statusDiv.innerText = "Bereit für die nächste Fahrt.";
+            }, gpsOptions);
+        });
+
+        // STOP
+        stopBtn.addEventListener('click', () => {
+            statusDiv.innerText = "Berechne Distanz...";
+            stopBtn.disabled = true;
+
+            navigator.geolocation.getCurrentPosition(position => {
+                const now = new Date();
+                const stopLat = position.coords.latitude;
+                const stopLon = position.coords.longitude;
+                const stopTime = now.toLocaleString('de-DE');
+
+                const distance = calculateDistance(
+                    currentTrip.startLat, currentTrip.startLon,
+                    stopLat, stopLon
+                );
+
+                const logEntry = {
+                    startTime: currentTrip.startTime,
+                    stopTime: stopTime,
+                    distance: distance.toFixed(2)
+                };
+
+                logs.unshift(logEntry); // Neue Fahrt ganz oben hinzufügen
+                localStorage.setItem('fahrtenLogs', JSON.stringify(logs));
+                
+                // Aktuellen Trip zurücksetzen
+                localStorage.removeItem('currentTrip');
+                currentTrip = null;
+
+                updateUI();
+            }, error => {
+                alert("Fehler beim Abrufen des Standorts für den Stop.");
+                stopBtn.disabled = false;
+                statusDiv.innerText = "📍 Fahrt läuft seit " + currentTrip.startTime.split(',')[1];
+            }, gpsOptions);
+        });
+
+        // Verlauf löschen
+        clearBtn.addEventListener('click', () => {
+            if(confirm("Möchtest du wirklich alle gespeicherten Fahrten löschen?")) {
+                logs = [];
+                localStorage.removeItem('fahrtenLogs');
+                updateUI();
+            }
+        });
+
+        // Init beim Laden der Seite
+        updateUI();
+    </script>
+</body>
+</html>
